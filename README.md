@@ -4,20 +4,18 @@ A starfall-based contraption scanner capable of scanning most major ACF entities
 Get the latest release using the Releases tab.
 
 ## Key
-![Markers](https://github.com/horizon-technologies/ContraptionScanner/assets/106459595/e8c21e13-7698-4cbe-ab96-a7d1c9a031ab)
+![Markers](https://github.com/marchc1/ContraptionScanner/assets/106459595/076bc6fb-6dc4-4cad-905f-5e12d702968b)
 
 ## Showcase
-![image](https://github.com/horizon-technologies/ContraptionScanner/assets/106459595/a18db93f-f897-4b1f-8a0e-363d61183f0b)
+![image](https://github.com/marchc1/ContraptionScanner/assets/106459595/25a2f782-0744-44a8-960a-2e4a28cbbb6c)
 *All entities currently scanned (except players). The left side are always shown, the right side are shown in extended mode.*
 
-![image](https://github.com/horizon-technologies/ContraptionScanner/assets/106459595/e9e5306a-f6d1-49ae-b179-4ea02ef8c27d)
+![image](https://github.com/marchc1/ContraptionScanner/assets/106459595/14451df1-5a0d-4d51-9bcb-3b216d9bb8e4)
 
 *Shows players outside of seats as \[PL\] markers.*
 
-![image](https://github.com/horizon-technologies/ContraptionScanner/assets/106459595/70543e91-ffd4-43dd-9577-d290b7581a8d)
+![image](https://github.com/marchc1/ContraptionScanner/assets/106459595/d753fe40-3b24-48ef-95bf-bd592ced9440)
 *When the scanned player is in a vehicle, the baseplate of the contraption is highlighted (with its bounding box shown). The player marker is placed  behind the vehicle marker, to show which vehicle is in use.*
-
-![image](https://github.com/horizon-technologies/ContraptionScanner/assets/106459595/dc1eef3d-3e65-4e66-be25-9e105835a5b2)
 
 ## Chat Functions
 ### !scan (part of player name OR SteamID):
