@@ -1,6 +1,8 @@
 # Contraption Scanner
 A starfall-based contraption scanner capable of scanning most major ACF entities & some wire components, with easibility of adding further entities in mind. Helps with verifying the legitimacy of a contraptions legality.
 
+Get the latest release using the Releases tab.
+
 ## Key
 ![Markers](https://github.com/horizon-technologies/ContraptionScanner/assets/106459595/e8c21e13-7698-4cbe-ab96-a7d1c9a031ab)
 
