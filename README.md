@@ -4,7 +4,7 @@ A starfall-based contraption scanner capable of scanning most major ACF entities
 ## Key
 ![Markers](https://github.com/horizon-technologies/ContraptionScanner/assets/106459595/35364d35-7b98-4ac6-8108-fb35e2c8c3e1)
 
-
+## Showcase
 ![image](https://github.com/horizon-technologies/ContraptionScanner/assets/106459595/a18db93f-f897-4b1f-8a0e-363d61183f0b)
 *All entities currently scanned (except players). The left side are always shown, the right side are shown in extended mode.*
 
