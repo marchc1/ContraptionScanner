@@ -1,4 +1,4 @@
---@name Contraption Scanner (July 26th, 2023 Release 1)
+--@name Contraption Scanner (July 26th, 2023, Release 1)
 --@author github.com/marchc1
 --@shared
 --@owneronly
