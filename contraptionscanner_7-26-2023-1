@@ -1,0 +1,317 @@
+--@name Contraption Scanner (July 26th, 2023 Release 1)
+--@author github.com/marchc1
+--@shared
+--@owneronly
+
+--[[
+	THIS IS A WORK IN PROGRESS!
+	
+	Things are probably not as efficient as they could be. This was made somewhat hastily. Report issues to the github here: https://github.com/marchc1/ContraptionScanner/issues
+]]
+
+local scannedPlayer = nil
+local last_scannedEnts = {}
+local scannedEnts = {}
+local baseplate = nil
+local inVehicle = false
+
+--Chat output message functionality
+local brackColor, brackL, brackR = Color(170, 170, 170), "[", "]"
+local realmColor, realm = SERVER and Color(100, 130, 225) or Color(245, 130, 100), "Scanner"
+local textColor = Color(235,235,235)
+local textAltColor = Color(190,235,120)
+local function fancyPrint(...)
+    print(brackColor,brackL,realmColor,realm,brackColor,brackR,textColor,": ",textColor,...)
+end
+
+--These are some helper functions I made to simplify the process of adding new entities.
+--To add a new entity to the scanner, you can simply add an entclass definition.
+--First argument is the entity class, the second argument is the marker color, the third is the marker text. Keep the marker text under two characters or else it will go beyond the space provided.
+--Fourth and fifth arguments are optional; the fourth will make it so the class is only shown in !extendscan mode, and the fifth doesn't write it to the classes table
+--The fifth argument is used to just store colors and markers for specific things that aren't class specific like baseplates
+
+local classes = {}
+local function entclass(cl, col, mark, extended, dontwrite)
+    local cls = {
+        class = cl,
+        color = col,
+        marker = mark, 
+        extended = extended or false
+    }
+    if not dontwrite then
+        classes[cl] = cls
+    end
+    
+    return cls
+end
+
+local baseplateLighterC = Color(255, 210, 255)
+local baseplateDarkerC = Color(155, 110, 155, 127)
+local baseplateC = entclass(nil, Color(255, 150, 255), "BP", false, true)
+local playerC = entclass(nil, Color(150, 200, 200), "PL", false, true)
+local playerCInSeat = entclass(nil, Color(150, 200, 200), "", false, true)
+local unknowntype = entclass(nil, Color(255, 255, 255), "?", false, true)
+
+entclass("acf_gun",                     Color(100, 130, 255), "G")
+entclass("acf_rack",                    Color(100, 230, 255), "RK")
+entclass("acf_ammo",                    Color(255, 50, 10),   "A")
+entclass("acf_radar",                   Color(255, 200, 50),  "R")
+entclass("prop_vehicle_prisoner_pod",   Color(130, 255, 100), "P")
+
+entclass("acf_engine",       Color(200, 255, 100), "E", true)
+entclass("acf_gearbox",      Color(128, 128, 160), "GB", true)
+entclass("acf_piledriver",   Color(255, 100, 100), "PD", true)
+entclass("acf_fueltank",     Color(220, 210, 230), "F", true)
+entclass("acf_armor",        Color(235, 235, 255), "AR", true)
+
+entclass("gmod_wire_expression2",     Color(230, 40, 40), "E2", true)
+entclass("starfall_processor",     Color(100, 140, 230), "SF", true)
+
+--Everything else down here shouldn't be touched
+local inExtendedMode = false
+local steamIDLpattern = "^STEAM_[0-9]:[0-9]:[0-9]*$"
+
+if SERVER then
+    local function checkIncludes(haystack, needle)
+        return string.find(string.lower(haystack), string.lower(needle)) ~= nil
+    end
+    local function checkPrecise(haystack, needle)
+        return string.lower(haystack) == string.lower(needle)
+    end
+    
+    hook.add("PlayerSay", "scanner.chat", function(ply, text)
+        if ply ~= owner() then return end
+        
+        if string.startWith(text, "!extendscan") then
+            inExtendedMode = not inExtendedMode
+            fancyPrint((inExtendedMode and "Now in" or "No longer in") .. " extended scanning mode.")    
+            return ""
+        elseif string.startWith(text, "!scan") then
+            local targ = string.sub(text, 7)
+            
+            local isSteamID = string.match(targ, steamIDLpattern)
+            if isSteamID then
+                for _, v in ipairs(find.allPlayers()) do
+                    if checkPrecise(v:getSteamID(), targ) then
+                        scannedPlayer = v
+                        fancyPrint("Now scanning " .. v:getName())
+                        break
+                    end
+                end
+            else
+                local plysWithName = find.playersByName(targ, false, false)
+                local c = table.count(plysWithName)
+                
+                if c == 0 then
+                    fancyPrint("No player online with '" .. targ .. "' in their name.")
+                elseif c > 1 then
+                    fancyprint("Too many players online with '" .. targ .. "' in their name.")
+                    
+                    local names = {}
+                    for _, v in ipairs(plysWithName) do table.insert(names, v:getName()) end
+                    
+                    fancyprint("(found " .. table.concat(names, ", ") .. ")")
+                else
+                    local v = plysWithName[1]
+                    
+                    scannedPlayer = v
+                    fancyPrint("Now scanning ", textAltColor, v:getName())
+                end
+            end
+            
+            return ""
+        elseif string.startWith(text, "!stopscan") then
+            if scannedPlayer == nil then
+                fancyPrint("No scan in progress.")
+                return
+            end
+            
+            fancyPrint("Stopping scan.")
+            
+            net.start("stopScan")
+            net.send(owner())
+            scannedPlayer = nil
+            scannedEnts = {}
+            return ""
+        end
+    end)
+    
+    function stopScan()
+        net.start("stopscan")
+        net.send(owner())
+    end
+    
+    timer.create("rescan", 2, 0, function()
+        if scannedPlayer ~= nil and not isValid(scannedPlayer) then
+            fancyPrint("Player has disconnected.")
+            scannedPlayer = nil
+        end
+        
+        if scannedPlayer == nil then return end
+        
+        inVehicle = scannedPlayer:inVehicle()
+        if not inVehicle then baseplate = nil else
+            baseplate = scannedPlayer:getVehicle()
+            while baseplate:getParent() ~= nil and isValid(baseplate:getParent()) do
+                baseplate = baseplate:getParent()
+            end
+        end
+        
+        local ents = find.all(function(e)
+            if not isValid(e)      then return false end
+            if e:isPlayer()        then return false end
+            if e:isWeapon()        then return false end
+            
+            if e:getOwner() ~= scannedPlayer then return false end
+            
+            local cls = classes[e:getClass()]
+            if cls == nil then return false end    
+            if cls.extended and not inExtendedMode then return false end
+            
+            return true
+        end)
+        
+        net.start("newents")
+        net.writeEntity(scannedPlayer)
+        
+        net.writeBool(inVehicle)
+        if inVehicle then
+            net.writeEntity(baseplate)
+        end
+        
+        net.writeUInt(#ents, 14)
+        for _, v in ipairs(ents) do 
+            net.writeEntity(v) 
+        end
+        
+        net.send(owner())
+    end)
+    local commandColor = Color(160, 190, 255)
+    local argColor = Color(150, 150, 170)
+    fancyPrint("Scanner ready.")
+    fancyPrint("Type ", commandColor, "!scan", textColor, " ", argColor, "(part of player name OR steamID)", textColor, " to scan a target.")
+    fancyPrint("Type ", commandColor, "!stopscan", textColor, " to stop scanning a player.")
+    fancyPrint("Type ", commandColor, "!extendscan", textColor, " to toggle extended viewing mode and view more entities (engines, gearboxes, etc...)")
+end
+
+if CLIENT then 
+    net.receive("newents", function()
+        scannedEnts = {}
+        
+        scannedPlayer = net.readEntity()
+        
+        inVehicle = net.readBool()
+        if inVehicle then
+            baseplate = net.readEntity()
+        end
+        
+        local amount = net.readUInt(14)
+        for i = 1, amount do
+            table.insert(scannedEnts, net.readEntity())
+        end
+    end)
+    
+    net.receive("stopScan", function()
+        scannedPlayer = nil
+        scannedEnts = {}
+    end)
+    
+    enableHud(owner(), true)
+    
+    local scrw, scrh = render.getResolution()
+    local scrw2, scrh2 = scrw/2, scrh/2
+
+    local f = render.createFont("DermaDefault", 18, 300, true)
+    local yes, no = "✓", "✗"
+    
+    local nooffset2xV = {x=0,y=0}
+    local function drawBox(v, clsinfo, rsw, rsh, posoffset)
+        rsw = rsw or 24
+        rsh = rsh or 24
+        posoffset = posoffset or nooffset2xV
+        
+        if isValid(v) then
+            local vp = nil
+            if v:isPlayer() or v:isVehicle() then
+                local b1, b2 = v:worldSpaceAABB()
+                vp = (b1 + b2) / 2
+            else
+                vp = v:getPos()
+            end
+            
+            local entPos = vp:toScreen()
+            local epx, epy = entPos.x + posoffset.x, entPos.y + posoffset.y
+            local rx, ry, rw, rh = epx - (rsw / 2), epy - (rsh / 2), rsw, rsh
+            
+            render.setColor(Color(0,0,0, 120))
+            render.drawRect(rx,ry,rw,rh)
+            
+            render.setColor(Color(0,0,0, 255))
+            render.drawRectOutline(rx,ry,rw,rh,3)
+            
+            render.setColor(clsinfo.color)
+            render.drawRectOutline(rx+1,ry+1,rw-2,rh-2,1)        
+            render.drawSimpleText(epx, epy, clsinfo.marker, 1, 1)
+        end
+    end
+    
+    hook.add("drawhud", "scanner.draw", function()
+        render.setColor(Color(0, 0, 0, 100))
+        local rectsizeW, rectsizeH = 400, 192
+        render.drawRect(scrw2 - (rectsizeW/2), scrh - (rectsizeH / 2), rectsizeW, rectsizeH)
+        
+        
+        render.setFont(f)
+        render.setColor(Color(255, 255, 255, 200))
+        render.drawSimpleText(scrw2, scrh - 80, isValid(scannedPlayer) and "Scanning " .. scannedPlayer:getName() or "Not scanning anyone.", 1, 1)
+        render.drawSimpleText(scrw2, scrh - 64, "Running in extended mode? " .. (inExtendedMode and yes or no), 1, 1)
+
+        if not isValid(scannedPlayer) then 
+        return end
+        
+        render.drawSimpleText(scrw2, scrh - 48, isValid(scannedPlayer) and "Critical entities count: " .. tostring(#scannedEnts), 1, 1)
+        render.drawSimpleText(scrw2, scrh - 32, isValid(scannedPlayer) and "In vehicle? " .. (inVehicle and yes or no), 1, 1)
+        
+        if inVehicle and isValid(baseplate) then
+            local v1, v8 = baseplate:getModelBounds()
+            render.setColor(baseplateLighterC)
+            
+            local v2 = Vector(v8.x, v1.y, v1.z)
+            local v3 = Vector(v1.x, v8.y, v1.z)
+            local v4 = Vector(v8.x, v8.y, v1.z)
+            
+            local v5 = Vector(v1.x, v1.y, v8.z)
+            local v6 = Vector(v8.x, v1.y, v8.z)
+            local v7 = Vector(v1.x, v8.y, v8.z)
+            
+            v1, v2, v3, v4, v5, v6, v7, v8 = baseplate:localToWorld(v1), baseplate:localToWorld(v2), baseplate:localToWorld(v3), baseplate:localToWorld(v4), baseplate:localToWorld(v5), baseplate:localToWorld(v6), baseplate:localToWorld(v7), baseplate:localToWorld(v8)
+            v1, v2, v3, v4, v5, v6, v7, v8 = v1:toScreen(), v2:toScreen(), v3:toScreen(), v4:toScreen(), v5:toScreen(), v6:toScreen(), v7:toScreen(), v8:toScreen()
+            
+            render.drawLine(v1.x, v1.y, v2.x, v2.y)
+            render.drawLine(v1.x, v1.y, v3.x, v3.y)
+            render.drawLine(v4.x, v4.y, v3.x, v3.y)
+            render.drawLine(v4.x, v4.y, v2.x, v2.y)
+            
+            render.drawLine(v5.x, v5.y, v6.x, v6.y)
+            render.drawLine(v5.x, v5.y, v7.x, v7.y)
+            render.drawLine(v8.x, v8.y, v7.x, v7.y)
+            render.drawLine(v8.x, v8.y, v6.x, v6.y)
+            
+            render.drawLine(v1.x, v1.y, v5.x, v5.y)
+            render.drawLine(v2.x, v2.y, v6.x, v6.y)
+            render.drawLine(v3.x, v3.y, v7.x, v7.y)
+            render.drawLine(v4.x, v4.y, v8.x, v8.y)
+            
+            drawBox(baseplate, baseplateC)
+            drawBox(scannedPlayer:getVehicle(), playerCInSeat, 30, 30)
+        else
+            drawBox(scannedPlayer, playerC)
+        end
+        
+        for _, v in ipairs(scannedEnts) do
+            if isValid(v) then
+                drawBox(v, classes[v:getClass()] or unknowntype)
+            end
+        end
+    end)
+end
