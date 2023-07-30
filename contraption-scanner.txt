@@ -1,12 +1,12 @@
---@name Contraption Scanner (July 26th, 2023, Release 1)
+--@name Contraption Scanner (July 30th, 2023, Release 2)
 --@author github.com/marchc1
 --@shared
 --@owneronly
 
 --[[
-	THIS IS A WORK IN PROGRESS!
-	
-	Things are probably not as efficient as they could be. This was made somewhat hastily. Report issues to the github here: https://github.com/marchc1/ContraptionScanner/issues
+    THIS IS A WORK IN PROGRESS!
+    
+    Things are probably not as efficient as they could be. This was made somewhat hastily. Report issues to the github here: https://github.com/marchc1/ContraptionScanner/issues
 ]]
 
 local scannedPlayer = nil
@@ -14,6 +14,11 @@ local last_scannedEnts = {}
 local scannedEnts = {}
 local baseplate = nil
 local inVehicle = false
+
+local Vector = Vector
+local isValid = isValid
+local net = net
+
 
 --Chat output message functionality
 local brackColor, brackL, brackR = Color(170, 170, 170), "[", "]"
@@ -31,12 +36,15 @@ end
 --The fifth argument is used to just store colors and markers for specific things that aren't class specific like baseplates
 
 local classes = {}
-local function entclass(cl, col, mark, extended, dontwrite)
+local function entclass(cl, col, mark, extended, dontwrite, drawbounds, drawmesh, drawmarker)
     local cls = {
         class = cl,
         color = col,
         marker = mark, 
-        extended = extended or false
+        extended = extended or false,
+        drawbounds = drawbounds or false,
+        drawmesh = drawmesh or false,
+        drawmarker = (drawmarker == nil and true or drawmarker)
     }
     if not dontwrite then
         classes[cl] = cls
@@ -54,7 +62,7 @@ local unknowntype = entclass(nil, Color(255, 255, 255), "?", false, true)
 
 entclass("acf_gun",                     Color(100, 130, 255), "G")
 entclass("acf_rack",                    Color(100, 230, 255), "RK")
-entclass("acf_ammo",                    Color(255, 50, 10),   "A")
+entclass("acf_ammo",                    Color(255, 50, 10),   "A", false, false, false, true, true) --may want to turn drawmarker to false
 entclass("acf_radar",                   Color(255, 200, 50),  "R")
 entclass("prop_vehicle_prisoner_pod",   Color(130, 255, 100), "P")
 
@@ -195,6 +203,19 @@ if SERVER then
 end
 
 if CLIENT then 
+    local clientsideProcessingEntity = {
+        ["acf_ammo"] = function(e)
+            local p = (e:getPhysicsObject())
+            if not isValid(p) then return end
+            
+            local m = p:getMesh()
+    
+            local p1, p8 = m[1].pos, m[19].pos
+            e.hitboxMin = p1
+            e.hitboxMax = p8
+        end
+    }
+    
     net.receive("newents", function()
         scannedEnts = {}
         
@@ -207,7 +228,15 @@ if CLIENT then
         
         local amount = net.readUInt(14)
         for i = 1, amount do
-            table.insert(scannedEnts, net.readEntity())
+            local e = net.readEntity()
+            if isValid(e) then
+                local special = clientsideProcessingEntity[e:getClass()]
+                if special then
+                    special(e)
+                end
+                
+                table.insert(scannedEnts, e)
+            end
         end
     end)
     
@@ -222,13 +251,34 @@ if CLIENT then
     local scrw2, scrh2 = scrw/2, scrh/2
 
     local f = render.createFont("DermaDefault", 18, 300, true)
+    local f2 = render.createFont("DermaDefault", 14, 300, true)
     local yes, no = "✓", "✗"
     
     local nooffset2xV = {x=0,y=0}
+    
+    local halfAlpha, fullAlpha = Color(0,0,0,120), Color(0,0,0,255)
+    
+    local render_setColor = render.setColor
+    local render_drawRect = render.drawRect
+    local render_drawRectOutline = render.drawRectOutline
+    local render_setFont = render.setFont
+    local render_drawSimpleText = render.drawSimpleText
+    
+    
     local function drawBox(v, clsinfo, rsw, rsh, posoffset)
         rsw = rsw or 24
         rsh = rsh or 24
+        
+        local rsw2, rsh2 = rsw / 2, rsh / 2
+        
         posoffset = posoffset or nooffset2xV
+        
+        if clsinfo.drawbounds then
+            drawEntityBounds(v, clsinfo.color)
+        end
+        if clsinfo.drawmesh then
+            drawEntityMesh(v, clsinfo.color)
+        end
         
         if isValid(v) then
             local vp = nil
@@ -242,65 +292,99 @@ if CLIENT then
             local entPos = vp:toScreen()
             local epx, epy = entPos.x + posoffset.x, entPos.y + posoffset.y
             local rx, ry, rw, rh = epx - (rsw / 2), epy - (rsh / 2), rsw, rsh
+            --printTable(clsinfo)
+            if clsinfo.drawmarker then
+                render_setColor(halfAlpha)
+                render_drawRect(rx,ry,rw,rh)
+                
+                render_setColor(fullAlpha)
+                render_drawRectOutline(rx,ry,rw,rh,3)
+                
+                render_setColor(clsinfo.color)
+                render_drawRectOutline(rx+1,ry+1,rw-2,rh-2,1)        
+                render_setFont(f)
+                render_drawSimpleText(epx, epy, clsinfo.marker, 1, 1)
+            end
+        
+            local entCollisionGroup = v:getCollisionGroup()
+            local isSolid = v:isSolid()
             
-            render.setColor(Color(0,0,0, 120))
-            render.drawRect(rx,ry,rw,rh)
+            render_setFont(f2)
             
-            render.setColor(Color(0,0,0, 255))
-            render.drawRectOutline(rx,ry,rw,rh,3)
+            if entCollisionGroup ~= 0 and not v:isPlayer() then --not player because player == collision group 5
+                render_drawSimpleText((epx - rsw2) - 2, (epy - rsh2) - 2, "" .. entCollisionGroup, 2, 0)
+            end
             
-            render.setColor(clsinfo.color)
-            render.drawRectOutline(rx+1,ry+1,rw-2,rh-2,1)        
-            render.drawSimpleText(epx, epy, clsinfo.marker, 1, 1)
+            if not isSolid then
+                render_drawSimpleText((epx + rsw2) + 2, (epy - rsh2) - 2, "NS", 0, 0)
+            end
         end
     end
     
+    function drawEntityMesh(baseplate, color)
+        render_setColor(color)
+        local p1, p8 = baseplate.hitboxMin, baseplate.hitboxMax
+        drawEntityBounds(baseplate, color, p1, p8)
+    end
+    
+    local render_drawLine = render.drawLine
+    --todo: I hate this
+    function drawEntityBounds(baseplate, color, v1, v8)
+        render_setColor(color)
+        
+        if v1 == nil or v8 == nil then
+            v1, v8 = baseplate:getModelBounds()
+        end
+        
+        local v2 = Vector(v8.x, v1.y, v1.z)
+        local v3 = Vector(v1.x, v8.y, v1.z)
+        local v4 = Vector(v8.x, v8.y, v1.z)
+        
+        local v5 = Vector(v1.x, v1.y, v8.z)
+        local v6 = Vector(v8.x, v1.y, v8.z)
+        local v7 = Vector(v1.x, v8.y, v8.z)
+        
+        v1, v2, v3, v4, v5, v6, v7, v8 = baseplate:localToWorld(v1), baseplate:localToWorld(v2), baseplate:localToWorld(v3), baseplate:localToWorld(v4), baseplate:localToWorld(v5), baseplate:localToWorld(v6), baseplate:localToWorld(v7), baseplate:localToWorld(v8)
+        v1, v2, v3, v4, v5, v6, v7, v8 = v1:toScreen(), v2:toScreen(), v3:toScreen(), v4:toScreen(), v5:toScreen(), v6:toScreen(), v7:toScreen(), v8:toScreen()
+        
+        render_drawLine(v1.x, v1.y, v2.x, v2.y)
+        render_drawLine(v1.x, v1.y, v3.x, v3.y)
+        render_drawLine(v4.x, v4.y, v3.x, v3.y)
+        render_drawLine(v4.x, v4.y, v2.x, v2.y)
+        
+        render_drawLine(v5.x, v5.y, v6.x, v6.y)
+        render_drawLine(v5.x, v5.y, v7.x, v7.y)
+        render_drawLine(v8.x, v8.y, v7.x, v7.y)
+        render_drawLine(v8.x, v8.y, v6.x, v6.y)
+        
+        render_drawLine(v1.x, v1.y, v5.x, v5.y)
+        render_drawLine(v2.x, v2.y, v6.x, v6.y)
+        render_drawLine(v3.x, v3.y, v7.x, v7.y)
+        render_drawLine(v4.x, v4.y, v8.x, v8.y)
+    end
+    
+    local infoBackgroundColor = Color(0, 0, 0, 100)
+    local infoTextColor = Color(255, 255, 255, 200)
     hook.add("drawhud", "scanner.draw", function()
-        render.setColor(Color(0, 0, 0, 100))
+        render_setColor(infoBackgroundColor)
         local rectsizeW, rectsizeH = 400, 192
-        render.drawRect(scrw2 - (rectsizeW/2), scrh - (rectsizeH / 2), rectsizeW, rectsizeH)
+        render_drawRect(scrw2 - (rectsizeW/2), scrh - (rectsizeH / 2), rectsizeW, rectsizeH)
         
         
-        render.setFont(f)
-        render.setColor(Color(255, 255, 255, 200))
-        render.drawSimpleText(scrw2, scrh - 80, isValid(scannedPlayer) and "Scanning " .. scannedPlayer:getName() or "Not scanning anyone.", 1, 1)
-        render.drawSimpleText(scrw2, scrh - 64, "Running in extended mode? " .. (inExtendedMode and yes or no), 1, 1)
+        render_setFont(f)
+        render_setColor(infoTextColor)
+        render_drawSimpleText(scrw2, scrh - 80, isValid(scannedPlayer) and "Scanning " .. scannedPlayer:getName() or "Not scanning anyone.", 1, 1)
+        render_drawSimpleText(scrw2, scrh - 64, "Running in extended mode? " .. (inExtendedMode and yes or no), 1, 1)
 
         if not isValid(scannedPlayer) then 
         return end
         
-        render.drawSimpleText(scrw2, scrh - 48, isValid(scannedPlayer) and "Critical entities count: " .. tostring(#scannedEnts), 1, 1)
-        render.drawSimpleText(scrw2, scrh - 32, isValid(scannedPlayer) and "In vehicle? " .. (inVehicle and yes or no), 1, 1)
+        render_drawSimpleText(scrw2, scrh - 48, isValid(scannedPlayer) and "Critical entities count: " .. tostring(#scannedEnts), 1, 1)
+        render_drawSimpleText(scrw2, scrh - 32, isValid(scannedPlayer) and "In vehicle? " .. (inVehicle and yes or no), 1, 1)
+
         
         if inVehicle and isValid(baseplate) then
-            local v1, v8 = baseplate:getModelBounds()
-            render.setColor(baseplateLighterC)
-            
-            local v2 = Vector(v8.x, v1.y, v1.z)
-            local v3 = Vector(v1.x, v8.y, v1.z)
-            local v4 = Vector(v8.x, v8.y, v1.z)
-            
-            local v5 = Vector(v1.x, v1.y, v8.z)
-            local v6 = Vector(v8.x, v1.y, v8.z)
-            local v7 = Vector(v1.x, v8.y, v8.z)
-            
-            v1, v2, v3, v4, v5, v6, v7, v8 = baseplate:localToWorld(v1), baseplate:localToWorld(v2), baseplate:localToWorld(v3), baseplate:localToWorld(v4), baseplate:localToWorld(v5), baseplate:localToWorld(v6), baseplate:localToWorld(v7), baseplate:localToWorld(v8)
-            v1, v2, v3, v4, v5, v6, v7, v8 = v1:toScreen(), v2:toScreen(), v3:toScreen(), v4:toScreen(), v5:toScreen(), v6:toScreen(), v7:toScreen(), v8:toScreen()
-            
-            render.drawLine(v1.x, v1.y, v2.x, v2.y)
-            render.drawLine(v1.x, v1.y, v3.x, v3.y)
-            render.drawLine(v4.x, v4.y, v3.x, v3.y)
-            render.drawLine(v4.x, v4.y, v2.x, v2.y)
-            
-            render.drawLine(v5.x, v5.y, v6.x, v6.y)
-            render.drawLine(v5.x, v5.y, v7.x, v7.y)
-            render.drawLine(v8.x, v8.y, v7.x, v7.y)
-            render.drawLine(v8.x, v8.y, v6.x, v6.y)
-            
-            render.drawLine(v1.x, v1.y, v5.x, v5.y)
-            render.drawLine(v2.x, v2.y, v6.x, v6.y)
-            render.drawLine(v3.x, v3.y, v7.x, v7.y)
-            render.drawLine(v4.x, v4.y, v8.x, v8.y)
+            drawEntityBounds(baseplate, baseplateLighterC)
             
             drawBox(baseplate, baseplateC)
             drawBox(scannedPlayer:getVehicle(), playerCInSeat, 30, 30)
